@@ -36,4 +36,4 @@ uv run piper-hdf5-to-lerobot --config configs/corn_in_plate.yaml --quiet
 - 图像通过等比例缩小和居中 padding 处理为 224x224；不拉伸场景内容。将 `target_width` 和 `target_height` 同时设为 `null` 可保留原尺寸。
 - LeRobot 原始字段为 `image`、`wrist_image`、`state`、`actions`。OpenPI 的 `LeRobotLiberoDataConfig` 会将前两个字段映射为其内部的 `observation/image` 与 `observation/wrist_image`。
 
-详细交接信息见 [docs/项目交接.md](docs/项目交接.md) 与 [docs/2026-07-24_使用说明.md](docs/2026-07-24_使用说明.md)。
+详细交接信息见 [docs/项目交接.md](docs/项目交接.md) 与 [docs/使用说明.md](docs/使用说明.md)。
