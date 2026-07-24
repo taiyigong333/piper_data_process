@@ -1,6 +1,6 @@
 # OpenPI 训练说明
 
-本文说明如何用本项目已转换的本地 LeRobot 数据集训练 OpenPI，并适用于项目固定的 OpenPI 子模块版本 `15a9616a00943ada6c20a0f158e3adb39df2ccac`。数据转换、媒体模式和数据集验证请参阅 [使用说明.md](使用说明.md)。
+本文说明如何用本项目已转换的本地 LeRobot 数据集训练 OpenPI，并适用于项目固定的 OpenPI 子模块版本 `15a9616a00943ada6c20a0f158e3adb39df2ccac`。本文只使用 OpenPI 原生 JAX 路径：训练入口为 `scripts/train.py`，不使用 `train_pytorch.py`、`torchrun`、权重转换或 `pytorch_weight_path`。数据转换、媒体模式和数据集验证请参阅 [使用说明.md](使用说明.md)。
 
 ## 数据集契约
 
@@ -26,7 +26,8 @@ OpenPI 使用独立的 `uv` 环境，不复用本项目根目录 `.venv`。OpenP
 cd /home/ubuntu/gcj/projects/data_collect/data_processed/openpi
 export UV_CACHE_DIR=/tmp/openpi-uv-cache
 export HF_LEROBOT_HOME=/home/ubuntu/gcj/projects/data_collect/data_processed/datasets
-export OPENPI_DATA_HOME=/home/ubuntu/gcj/projects/data_collect/data_processed/openpi-cache
+# 替换为实际的大容量可写目录；下文示例统一使用该路径。
+export OPENPI_DATA_HOME=/mnt/piper-openpi/cache
 GIT_LFS_SKIP_SMUDGE=1 uv sync
 GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
 nvidia-smi
@@ -42,6 +43,28 @@ uv run python -c "from lerobot.common.datasets.lerobot_dataset import LeRobotDat
 ```
 
 预期样本数为 `20310`，两个向量的最后一维均为 `7`（不同 PyTorch/LeRobot 版本可能显示为 `torch.Size([7])` 或 `(7,)`）。
+
+## JAX 路径与模型存储位置
+
+本项目的 π₀.₅ 训练固定运行 `uv run scripts/train.py`。不要设置 `pytorch_weight_path`，也不要执行 `train_pytorch.py` 或 JAX/PyTorch 权重转换脚本；基础权重由 JAX 的 `CheckpointWeightLoader` 直接读取。
+
+三个目录用途不同，不能只设置 `OPENPI_DATA_HOME`：
+
+| 内容 | 设置方式 | π₀.₅ LoRA 示例位置 |
+| --- | --- | --- |
+| 自动下载的 π₀.₅ 基础权重 | 环境变量 `OPENPI_DATA_HOME` | `/mnt/piper-openpi/cache/openpi-assets/checkpoints/pi05_base/params` |
+| 当前数据集的归一化统计量 | 训练配置的 `assets_base_dir` | `/mnt/piper-openpi/assets/pi05_piper_corn_lora/taiyigong333/piper_corn_in_plate/` |
+| 训练输出的 JAX/Orbax 检查点 | 训练配置的 `checkpoint_base_dir` | `/mnt/piper-openpi/checkpoints/pi05_piper_corn_lora/corn_lora_v1/<step>/` |
+
+将下列路径替换为实际的、大容量且可写的绝对目录。基础权重首次被 `weight_loader` 使用时会自动下载；也可在训练前主动下载并打印最终路径：
+
+```bash
+export OPENPI_DATA_HOME=/mnt/piper-openpi/cache
+mkdir -p "$OPENPI_DATA_HOME" /mnt/piper-openpi/assets /mnt/piper-openpi/checkpoints
+uv run python -c "from openpi.shared.download import maybe_download; print(maybe_download('gs://openpi-assets/checkpoints/pi05_base/params'))"
+```
+
+对于上述 URL，OpenPI 会把远程路径映射为 `$OPENPI_DATA_HOME/openpi-assets/checkpoints/pi05_base/params`。重新打开终端后，必须再次导出 `OPENPI_DATA_HOME`，否则会回退到 `~/.cache/openpi`。
 
 ## 注册 Piper 配置
 
@@ -88,6 +111,8 @@ OpenPI 的训练和统计量命令都通过已注册的配置名工作。因此�
 
 当前 OpenPI 只支持 π₀.₅ 的 flow-matching head 训练与推理，不存在可直接替换的 π₀.₅-FAST 配置。π₀.₅ 的基础权重为 `gs://openpi-assets/checkpoints/pi05_base/params`，推荐从基础模型训练本 Piper 数据，而不要直接采用 DROID 专家权重或其归一化统计：DROID 示例的动作语义是关节速度，与本项目的绝对关节位置目标不一致。
 
+`Pi0Config` 是 π₀ 与 π₀.₅ 共用的配置类，名称不是模型选择结果。`pi05=True` 会使 `model_type` 变为 `PI05`；模型初始化会为动作专家启用 π₀.₅ 的 AdaRMS 条件化，并使用 π₀.₅ 的默认 token 长度。因此，下面的 `Pi0Config(pi05=True, ...)` 是当前 OpenPI 正确的 π₀.₅ JAX 配置；同时 `weight_loader` 必须指向 `pi05_base`，不能误用 `pi0_base`。
+
 对于 Piper，应保留 π₀.₅ 内部的 `action_dim=32`，而不是改成 7。OpenPI 的 `PadStatesAndActions` 会把 7 维 `state`/`actions` 填充到基础模型所需的 32 维，`LiberoOutputs` 在推理时再截取前 7 维。`pi05_libero` 也使用 32 维内部动作空间。显式设置 `discrete_state_input=False` 与现有 LIBERO 路径一致，使 Piper 连续关节状态走连续状态输入；不要使用 π₀.₅ 默认的离散状态输入设置。
 
 ```python
@@ -116,13 +141,60 @@ OpenPI 的训练和统计量命令都通过已注册的配置名工作。因此�
         weight_loader=weight_loaders.CheckpointWeightLoader(
             "gs://openpi-assets/checkpoints/pi05_base/params"
         ),
+        assets_base_dir="/mnt/piper-openpi/assets",
+        checkpoint_base_dir="/mnt/piper-openpi/checkpoints",
         num_train_steps=30_000,
         save_interval=1_000,
         wandb_enabled=False,
     ),
 ```
 
-该配置是完整微调，`batch_size=8` 只是在显存允许时用于小数据集的起始值，不能把它理解为 24 GB 显卡可运行的保证。请先完成一小段训练验证显存，再确定批大小和训练步数。π₀.₅ 的公开示例没有针对本 Piper 数据已验证的 LoRA 配方，因此不将未经验证的 π₀.₅ LoRA 配置列为推荐路径。
+该配置是完整微调，`batch_size=8` 只是在显存允许时用于小数据集的起始值，不能把它理解为 24 GB 显卡可运行的保证。请先完成一小段训练验证显存，再确定批大小和训练步数。
+
+### π₀.₅ JAX LoRA 微调
+
+当前源码的 JAX 路径支持 π₀.₅ LoRA：`gemma_2b_lora` 为 PaliGemma 的注意力和前馈层创建 rank 16、alpha 16 的适配器，`gemma_300m_lora` 为动作专家创建 rank 32、alpha 32 的适配器。`CheckpointWeightLoader` 会从 π₀.₅ 基础检查点加载同名参数，并保留新建的 LoRA 参数；与模型配置匹配的 `get_freeze_filter()` 会冻结 Gemma 基座权重而不冻结 LoRA 参数。当前过滤器不会冻结视觉编码器和非 Gemma 投影层，因此它们仍会参与训练。不要把 LoRA 配置与完整微调配置混用。
+
+以下为 Piper 的 JAX LoRA 配置，加入同一 `_CONFIGS` 列表：
+
+```python
+    TrainConfig(
+        name="pi05_piper_corn_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=10,
+            discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotLiberoDataConfig(
+            repo_id="taiyigong333/piper_corn_in_plate",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "gs://openpi-assets/checkpoints/pi05_base/params"
+        ),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=10,
+            discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=8,
+        assets_base_dir="/mnt/piper-openpi/assets",
+        checkpoint_base_dir="/mnt/piper-openpi/checkpoints",
+        num_train_steps=30_000,
+        save_interval=1_000,
+        wandb_enabled=False,
+    ),
+```
+
+LoRA 主要降低需要保存和更新的参数量，但仍需容纳视觉编码器、激活和 JAX 编译缓存。先从 `batch_size=2` 或 `4` 验证，再视显存提高到 `8`；此配置不保证任意 24 GB GPU 都能完成训练。
 
 ### π₀.₅ 训练要点
 
@@ -135,32 +207,32 @@ OpenPI 的训练和统计量命令都通过已注册的配置名工作。因此�
 
 ## 生成统计量与训练
 
-保持前述环境变量，在 `openpi` 目录运行。以下命令以 `pi0_fast_piper_corn_lora` 为例；训练 π₀.₅ 时将配置名整体替换为 `pi05_piper_corn`。
+保持前述环境变量，在 `openpi` 目录运行。以下命令以推荐的 JAX LoRA 配置 `pi05_piper_corn_lora` 为例；完整微调时将配置名整体替换为 `pi05_piper_corn`。不要改用 PyTorch 命令。
 
 先检查配置是否已经注册：
 
 ```bash
-uv run python -c "from openpi.training import config; train_config = config.get_config('pi0_fast_piper_corn_lora'); print(train_config.data.repo_id, train_config.model.action_dim, train_config.model.action_horizon)"
+uv run python -c "from openpi.training import config; train_config = config.get_config('pi05_piper_corn_lora'); print(train_config.data.repo_id, train_config.model.model_type, train_config.model.action_dim, train_config.model.action_horizon)"
 ```
 
-计算当前 Piper 数据的归一化统计量。它会写入 `openpi/assets/<config_name>/taiyigong333/piper_corn_in_plate/`；每次更换数据、动作语义或配置后都要重新生成。
+计算当前 Piper 数据的归一化统计量。它会写入 `<assets_base_dir>/<config_name>/taiyigong333/piper_corn_in_plate/`；对上方 LoRA 配置即为 `/mnt/piper-openpi/assets/pi05_piper_corn_lora/taiyigong333/piper_corn_in_plate/`。每次更换数据、动作语义或配置后都要重新生成。
 
 ```bash
-uv run scripts/compute_norm_stats.py --config-name pi0_fast_piper_corn_lora
+uv run scripts/compute_norm_stats.py --config-name pi05_piper_corn_lora
 ```
 
 首次训练会自动下载相应的基础权重到 `OPENPI_DATA_HOME`，因此需要可访问 `gs://openpi-assets` 的网络。
 
 ```bash
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.85 \
-uv run scripts/train.py pi0_fast_piper_corn_lora --exp-name=corn_v1 --overwrite
+uv run scripts/train.py pi05_piper_corn_lora --exp-name=corn_lora_v1 --overwrite
 ```
 
-检查点写入 `openpi/checkpoints/<config_name>/<exp_name>/`。中断恢复时移除 `--overwrite` 并使用相同实验名：
+检查点写入 `<checkpoint_base_dir>/<config_name>/<exp_name>/`。中断恢复时移除 `--overwrite` 并使用相同实验名：
 
 ```bash
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.85 \
-uv run scripts/train.py pi0_fast_piper_corn_lora --exp-name=corn_v1 --resume
+uv run scripts/train.py pi05_piper_corn_lora --exp-name=corn_lora_v1 --resume
 ```
 
 ## 策略服务与 Piper 接入
@@ -169,8 +241,8 @@ uv run scripts/train.py pi0_fast_piper_corn_lora --exp-name=corn_v1 --resume
 
 ```bash
 uv run scripts/serve_policy.py policy:checkpoint \
-    --policy.config=pi0_fast_piper_corn_lora \
-    --policy.dir=checkpoints/pi0_fast_piper_corn_lora/corn_v1/<checkpoint_step>
+    --policy.config=pi05_piper_corn_lora \
+    --policy.dir=/mnt/piper-openpi/checkpoints/pi05_piper_corn_lora/corn_lora_v1/<checkpoint_step>
 ```
 
 Piper 控制端应向策略提供 `observation/image`、`observation/wrist_image`（均为 HWC、`uint8` RGB 图像）、`observation/state`（`[J1, J2, J3, J4, J5, J6, gripper]` 的 `float32` 向量）和训练时的 `prompt`。策略返回同一顺序的 7 维绝对关节目标及绝对夹爪开度。
