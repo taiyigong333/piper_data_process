@@ -49,6 +49,10 @@ class OutputConfig:
     robot_type: str
     fps: int | None
     use_videos: bool
+    video_codec: str
+    video_preset: str
+    video_crf: int
+    video_keyframe_interval: int
     image_writer_processes: int
     image_writer_threads: int
     overwrite: bool
@@ -214,6 +218,18 @@ def load_conversion_config(path: str | Path) -> ConversionConfig:
     )
     fps_raw = output_raw.get("fps")
     fps = None if fps_raw is None else _positive_int(fps_raw, "output.fps")
+    video_codec = str(output_raw.get("video_codec", "libx264"))
+    if video_codec != "libx264":
+        raise ConversionError("output.video_codec 当前只支持项目 FFmpeg 已验证的 libx264。")
+    video_preset = str(output_raw.get("video_preset", "medium"))
+    if video_preset not in {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}:
+        raise ConversionError("output.video_preset 不是 libx264 支持的 preset。")
+    video_crf = int(output_raw.get("video_crf", 23))
+    if not 0 <= video_crf <= 51:
+        raise ConversionError("output.video_crf 必须在 0 到 51 之间。")
+    video_keyframe_interval = _positive_int(
+        output_raw.get("video_keyframe_interval", 30), "output.video_keyframe_interval"
+    )
 
     return ConversionConfig(
         source=SourceConfig(
@@ -226,7 +242,11 @@ def load_conversion_config(path: str | Path) -> ConversionConfig:
             root=_resolve_path(str(_required(output_raw, "root", "output")), source_path.parent),
             robot_type=str(output_raw.get("robot_type", "piper")),
             fps=fps,
-            use_videos=bool(output_raw.get("use_videos", False)),
+            use_videos=bool(output_raw.get("use_videos", True)),
+            video_codec=video_codec,
+            video_preset=video_preset,
+            video_crf=video_crf,
+            video_keyframe_interval=video_keyframe_interval,
             image_writer_processes=int(output_raw.get("image_writer_processes", 0)),
             image_writer_threads=int(output_raw.get("image_writer_threads", 0)),
             overwrite=bool(output_raw.get("overwrite", False)),
@@ -548,6 +568,15 @@ def _write_dataset_description(
             "max_state_age_ms": config.alignment.max_state_age_ms or metadata.max_alignment_age_ms,
         },
         "image_size": [config.images.target_width, config.images.target_height],
+        "media_storage": "mp4" if config.output.use_videos else "parquet_image",
+        "video": {
+            "codec": config.output.video_codec,
+            "preset": config.output.video_preset,
+            "crf": config.output.video_crf,
+            "keyframe_interval": config.output.video_keyframe_interval,
+        }
+        if config.output.use_videos
+        else None,
         "task": config.description.task,
         "intended_model": config.description.intended_model,
         "notes": config.description.notes,
@@ -566,6 +595,7 @@ def _write_dataset_description(
             f"- 动作：{config.representation.action_representation}，目标为下一图像时刻的机器人反馈。",
             f"- 对齐：{config.alignment.strategy}；仅使用图像时刻之前的机器人状态。",
             f"- 图像：等比例缩放至 {config.images.target_width}x{config.images.target_height}，居中填充。",
+            f"- 媒体：{'H.264 MP4' if config.output.use_videos else 'Parquet 内嵌图像'}。",
             f"- 轨迹：{len(reports)} 条；帧率：{fps} Hz。",
             "",
             config.description.notes,
@@ -604,9 +634,22 @@ def convert_dataset(
         import datasets
 
         datasets.disable_progress_bars()
-    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+    import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
+    if config.output.use_videos:
+        from .ffmpeg import ProjectFFmpegError, install_lerobot_video_encoder
 
-    dataset = LeRobotDataset.create(
+        try:
+            install_lerobot_video_encoder(
+                lerobot_dataset,
+                codec=config.output.video_codec,
+                preset=config.output.video_preset,
+                crf=config.output.video_crf,
+                keyframe_interval=config.output.video_keyframe_interval,
+            )
+        except ProjectFFmpegError as error:
+            raise ConversionError(f"项目 FFmpeg 不可用，无法生成 MP4：{error}") from error
+
+    dataset = lerobot_dataset.LeRobotDataset.create(
         repo_id=config.output.repo_id,
         root=staging_root,
         robot_type=config.output.robot_type or metadata.robot_name,

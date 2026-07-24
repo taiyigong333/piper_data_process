@@ -12,6 +12,7 @@ dependencies = [
     # LeRobot 该提交通过 torch.Tensor 读取此版本的 datasets.Column，需与 OpenPI 锁文件保持一致。
     "datasets==3.6.0",
     "h5py>=3.9",
+    "imageio-ffmpeg==0.6.0",
     "numpy>=1.22.4,<2.0.0",
     "Pillow>=11.0.0",
     "PyYAML>=6.0",
@@ -20,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 piper-hdf5-to-lerobot = "piper_data_process.cli:main"
+piper-project-ffmpeg = "piper_data_process.ffmpeg:main"
 
 [dependency-groups]
 dev = [

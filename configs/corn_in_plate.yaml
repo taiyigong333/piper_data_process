@@ -13,8 +13,13 @@ output:
   robot_type: piper
   # null 时读取 collection_config.acquisition.camera_rig_hz。
   fps: null
-  # 当前机器的 ffmpeg 动态库不可用，默认使用 PNG 图像；LeRobot 和 OpenPI 均可直接读取。
+  # true: 使用项目 uv 环境中的静态 FFmpeg 生成 MP4；false: 将图片嵌入 Parquet。
+  # 当前机器的标准 LeRobot 视频解码依赖系统动态 FFmpeg，训练默认使用图片模式。
   use_videos: false
+  video_codec: libx264
+  video_preset: medium
+  video_crf: 23
+  video_keyframe_interval: 30
   image_writer_processes: 4
   image_writer_threads: 4
   overwrite: false
@@ -24,8 +29,8 @@ representation:
   state_source: joint_positions
   include_gripper: true
   # absolute: 下一图像时刻的绝对目标；relative: 当前到下一时刻的增量，夹爪仍为绝对开度。
-  # pi0/pi0.5 通常使用相对关节动作，因此默认 relative。
-  action_representation: relative
+  # 默认保留 absolute；OpenPI 训练端可通过 extra_delta_transform=True 转为相对关节动作。
+  action_representation: absolute
   # 物理反馈不是控制命令，故以“下一图像时刻的反馈状态”作为行为克隆监督目标。
   action_horizon_frames: 1
 
@@ -49,5 +54,5 @@ images:
 
 description:
   task: "pick up the corn and put it on the plate"
-  intended_model: "OpenPI pi0/pi0.5 fine-tuning via LeRobotLiberoDataConfig"
+  intended_model: "OpenPI fine-tuning via LeRobotLiberoDataConfig(extra_delta_transform=True)"
   notes: "Piper real-robot teleoperation data; RGB frames are resized with aspect ratio preserved and padded."

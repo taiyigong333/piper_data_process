@@ -1951,6 +1951,7 @@ source = { editable = "." }
 dependencies = [
     { name = "datasets" },
     { name = "h5py" },
+    { name = "imageio-ffmpeg" },
     { name = "lerobot" },
     { name = "numpy" },
     { name = "pillow" },
@@ -1966,6 +1967,7 @@ dev = [
 requires-dist = [
     { name = "datasets", specifier = "==3.6.0" },
     { name = "h5py", specifier = ">=3.9" },
+    { name = "imageio-ffmpeg", specifier = "==0.6.0" },
     { name = "lerobot", git = "https://github.com/huggingface/lerobot?rev=0cf864870cf29f4738d3ade893e6fd13fbd7cdb5" },
     { name = "numpy", specifier = ">=1.22.4,<2.0.0" },
     { name = "pillow", specifier = ">=11.0.0" },
