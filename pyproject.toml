@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "piper-data-process"
+version = "0.1.0"
+description = "将 Piper 采集的 HDF5 轨迹转换为 OpenPI 可训练的 LeRobot v2.1 数据集"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # LeRobot 该提交通过 torch.Tensor 读取此版本的 datasets.Column，需与 OpenPI 锁文件保持一致。
+    "datasets==3.6.0",
+    "h5py>=3.9",
+    "numpy>=1.22.4,<2.0.0",
+    "Pillow>=11.0.0",
+    "PyYAML>=6.0",
+    "lerobot @ git+https://github.com/huggingface/lerobot@0cf864870cf29f4738d3ade893e6fd13fbd7cdb5",
+]
+
+[project.scripts]
+piper-hdf5-to-lerobot = "piper_data_process.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,53 @@
+# Piper 玉米放盘任务的默认转换配置。
+# 源 HDF5 与采集 YAML 只读取，不依赖采集工程中的 Python 代码。
+source:
+  hdf5_root: /home/ubuntu/gcj/projects/data_collect/data/corm_in_plate/real/20260720
+  trajectory_glob: "**/trajectory.hdf5"
+  collection_config: /home/ubuntu/gcj/projects/data_collect/piper_with_pica/configs/pick_up_the_corn_and_put_it_on_the_plate.yaml
+
+output:
+  # repo_id 是 LeRobot/OpenPI 的数据集标识；root 是本地数据集目录。
+  repo_id: taiyigong333/piper_corn_in_plate
+  # 与 HF_LEROBOT_HOME=<data_processed>/datasets 组合后，可被 OpenPI 的标准加载器直接发现。
+  root: ../datasets/taiyigong333/piper_corn_in_plate
+  robot_type: piper
+  # null 时读取 collection_config.acquisition.camera_rig_hz。
+  fps: null
+  # 当前机器的 ffmpeg 动态库不可用，默认使用 PNG 图像；LeRobot 和 OpenPI 均可直接读取。
+  use_videos: false
+  image_writer_processes: 4
+  image_writer_threads: 4
+  overwrite: false
+
+representation:
+  # 可选 joint_positions 或 tcp_pose。两者均会在末尾拼接夹爪位置（若 include_gripper=true）。
+  state_source: joint_positions
+  include_gripper: true
+  # absolute: 下一图像时刻的绝对目标；relative: 当前到下一时刻的增量，夹爪仍为绝对开度。
+  # pi0/pi0.5 通常使用相对关节动作，因此默认 relative。
+  action_representation: relative
+  # 物理反馈不是控制命令，故以“下一图像时刻的反馈状态”作为行为克隆监督目标。
+  action_horizon_frames: 1
+
+alignment:
+  # previous 是因果对齐：只使用拍摄时刻之前最近的 60Hz 机器人反馈，绝不读取未来状态。
+  strategy: previous
+  # null 时读取 collection_config.acquisition.max_alignment_age_ms。
+  max_state_age_ms: null
+
+images:
+  # null 可保持原图大小；此处按要求等比例缩小后居中黑边补齐到 224 x 224。
+  target_width: 224
+  target_height: 224
+  pad_rgb: [0, 0, 0]
+  validate_source_size: true
+  cameras:
+    - source_name: camera_front
+      feature_name: image
+    - source_name: camera_wrist_right
+      feature_name: wrist_image
+
+description:
+  task: "pick up the corn and put it on the plate"
+  intended_model: "OpenPI pi0/pi0.5 fine-tuning via LeRobotLiberoDataConfig"
+  notes: "Piper real-robot teleoperation data; RGB frames are resized with aspect ratio preserved and padded."
